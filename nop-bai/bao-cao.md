@@ -56,6 +56,7 @@ Chỉ số F1-score trên lớp dương tính toán trung bình điều hòa gi�
 
 ## 5. Phần Bonus Đã Thực Hiện (nếu có)
 
+- [x] Bonus 1 - Tracking MLflow từ xa với DagsHub: Đã kết nối repo với DagsHub và cấu hình tự động log experiments lên server MLflow từ xa tại DagsHub.
 - [x] Bonus 2 - Điều chỉnh ngưỡng quyết định: Quét ngưỡng xác suất [0.1 - 0.95] tìm được ngưỡng tối ưu 0.35 giúp tăng F1 từ 0.7156 lên 0.7339.
 - [x] Bonus 3 - Báo cáo precision / recall tự động: Tự động tạo Confusion Matrix và Classification Report chi tiết lưu trong `outputs/detail.txt` và GitHub artifact.
 - [x] Bonus 4 - Hoàn trả về phiên bản trước / Quality Gate an toàn: Pipeline tự động kiểm định và chặn release (báo lỗi Quality Gate) khi F1 < 0.65 (minh chứng trong ảnh `06-quality-gate-chan.png`).
