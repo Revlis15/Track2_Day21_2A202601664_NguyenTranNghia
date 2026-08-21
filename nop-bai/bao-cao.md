@@ -58,4 +58,5 @@ Chỉ số F1-score trên lớp dương tính toán trung bình điều hòa gi�
 
 - [x] Bonus 2 - Điều chỉnh ngưỡng quyết định: Quét ngưỡng xác suất [0.1 - 0.95] tìm được ngưỡng tối ưu 0.35 giúp tăng F1 từ 0.7156 lên 0.7339.
 - [x] Bonus 3 - Báo cáo precision / recall tự động: Tự động tạo Confusion Matrix và Classification Report chi tiết lưu trong `outputs/detail.txt` và GitHub artifact.
+- [x] Bonus 4 - Hoàn trả về phiên bản trước / Quality Gate an toàn: Pipeline tự động kiểm định và chặn release (báo lỗi Quality Gate) khi F1 < 0.65 (minh chứng trong ảnh `06-quality-gate-chan.png`).
 - [x] Bonus 5 - Cảnh báo lệch lạc dữ liệu: Kiểm tra tỷ lệ lớp dương trong tập huấn luyện (24.77% so với chuẩn 24.80%) và ghi nhận vào `outputs/report.json`.
