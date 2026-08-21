@@ -1,0 +1,4 @@
+[core]
+    remote = labstore
+['remote "labstore"']
+    url = gs://income-mlops-vinaitc-2a202601664/dvc

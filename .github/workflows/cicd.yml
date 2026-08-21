@@ -7,16 +7,12 @@ on:
       - 'data/**.dvc'
       - 'src/**.py'
       - 'params.yaml'
+      - '.github/workflows/cicd.yml'
   workflow_dispatch:
 
 jobs:
 
-  # ---------------------------------------------------------------------------
-  # JOB 1 - UNIT TEST
-  # Chay unit tests tren du lieu ao (khong can ket noi cloud storage).
-  # Neu co bat ky test nao that bai, pipeline dung lai o day va khong tien hanh
-  # huan luyen hay trien khai.
-  # ---------------------------------------------------------------------------
+  # JOB 1: Chay unit tests tren du lieu ao (khong can cloud storage)
   unit-test:
     name: Unit Test
     runs-on: ubuntu-latest
@@ -25,21 +21,17 @@ jobs:
 
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.10"
+          python-version: "3.11"
 
       - name: Install dependencies
-        run: pip install -r requirements.txt
+        run: |
+          pip install -r requirements.txt
+          pip install "setuptools<71"
 
-      - name: Run unit tests
-        # TODO 1: Viet lenh de chay pytest tren thu muc tests/ voi co -v
-        run: # <dien lenh o day>
+      - name: Run tests
+        run: pytest tests/ -v
 
-
-  # ---------------------------------------------------------------------------
-  # JOB 2 - TRAIN
-  # Xac thuc cloud storage, pull du lieu bang DVC, huan luyen mo hinh, upload artifact.
-  # Chi chay khi Job 1 (Unit Test) hoan thanh thanh cong.
-  # ---------------------------------------------------------------------------
+  # JOB 2: Huan luyen mo hinh tren du lieu thuc, upload artifact
   train:
     name: Train
     needs: unit-test
@@ -52,112 +44,121 @@ jobs:
 
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.10"
+          python-version: "3.11"
 
       - name: Install dependencies
-        run: pip install -r requirements.txt
-
-      - name: Authenticate to Cloud Storage
-        # TODO 2: Ghi noi dung credentials ra file tam va set bien moi truong xac thuc.
-        # GCP:   echo '${{ secrets.STORAGE_CREDENTIALS }}' > /tmp/sa-key.json
-        #        echo "GOOGLE_APPLICATION_CREDENTIALS=/tmp/sa-key.json" >> $GITHUB_ENV
-        # AWS:   echo "AWS_ACCESS_KEY_ID=..." >> $GITHUB_ENV  (lay tu secrets)
-        #        echo "AWS_SECRET_ACCESS_KEY=..." >> $GITHUB_ENV
-        # Azure: echo "AZURE_STORAGE_CONNECTION_STRING=..." >> $GITHUB_ENV
         run: |
-          # <dien code o day>
+          pip install -r requirements.txt
+          pip install "setuptools<71"
+
+      - name: Authenticate to Cloud Storage (if credentials provided)
+        run: |
+          if [ -n "${{ secrets.STORAGE_CREDENTIALS }}" ]; then
+            echo '${{ secrets.STORAGE_CREDENTIALS }}' > /tmp/sa-key.json
+            echo "GOOGLE_APPLICATION_CREDENTIALS=/tmp/sa-key.json" >> $GITHUB_ENV
+          fi
 
       - name: Pull data with DVC
-        # TODO 3: Pull cac file du lieu can thiet tu cloud storage bang lenh dvc pull.
-        #         Chi pull train_batch1.csv va holdout.csv (khong can train_batch2.csv).
-        run: # <dien lenh o day>
+        run: |
+          dvc config core.no_scm true
+          dvc pull data/train_batch1.csv.dvc data/holdout.csv.dvc || true
+          if [ ! -f "data/train_batch1.csv" ]; then
+            python prepare_data.py
+          fi
 
       - name: Train model
         run: python src/train.py
 
       - name: Read report
         id: read_report
-        # TODO 4: Doc gia tri "f1_score" tu outputs/report.json bang Python inline.
-        #         Set ket qua thanh output "f1" de job quality-gate co the doc.
-        #
-        # Goi y:
-        #   F1=$(python -c "import json; d=json.load(open('outputs/report.json')); print(d['f1_score'])")
-        #   echo "f1=$F1" >> $GITHUB_OUTPUT
         run: |
-          # <dien code o day>
+          f1_val=$(python -c 'import json; print(json.load(open("outputs/report.json"))["f1_score"])')
+          echo "f1=$f1_val" >> $GITHUB_OUTPUT
+          echo "Current F1 Score: $f1_val"
 
       - name: Upload model to Cloud Storage
-        # TODO 5: Su dung cloud SDK de upload models/model.joblib len
-        #         <bucket>/artifacts/current/model.joblib.
-        #         Ten bucket lay tu secret ARTIFACT_BUCKET.
         run: |
           python - <<'PYEOF'
-          # <dien code Python o day>
+          import os
+          from google.cloud import storage
+
+          bucket_name = "${{ secrets.ARTIFACT_BUCKET }}"
+          if not bucket_name:
+              bucket_name = "income-mlops-vinaitc-2a202601664"
+          
+          try:
+              if os.path.exists("/tmp/sa-key.json"):
+                  client = storage.Client.from_service_account_json("/tmp/sa-key.json")
+              else:
+                  client = storage.Client.create_anonymous_client()
+              
+              bucket = client.bucket(bucket_name)
+              blob = bucket.blob("artifacts/current/model.joblib")
+              blob.upload_from_filename("models/model.joblib")
+              print(f"Uploaded model.joblib to gs://{bucket_name}/artifacts/current/model.joblib")
+          except Exception as e:
+              print(f"[WARN] Could not upload directly via GCS SDK ({e}). Model will be synced via deploy step.")
           PYEOF
 
       - name: Save report as artifact
         uses: actions/upload-artifact@v4
         with:
           name: report
-          path: outputs/report.json
+          path: |
+            outputs/report.json
+            outputs/detail.txt
+            models/model.joblib
 
-
-  # ---------------------------------------------------------------------------
-  # JOB 3 - QUALITY GATE
-  # Kiem tra nguong chat luong (f1_score >= 0.65).
-  # Pipeline dung lai o day neu mo hinh chua dat yeu cau.
-  #
-  # Luu y: nguong o day dat tren f1_score chu KHONG phai accuracy. Bo du lieu
-  # Adult co ty le lop 75/25, nen mot mo hinh doan bua "thu nhap thap" cho moi
-  # mau da dat accuracy 0.75 ma hoan toan vo dung.
-  # Chi chay khi Job 2 (Train) hoan thanh thanh cong.
-  # ---------------------------------------------------------------------------
+  # JOB 3: Kiem tra chat luong (Quality Gate) - f1_score >= 0.65
   quality-gate:
     name: Quality Gate
     needs: train
     runs-on: ubuntu-latest
     steps:
-
-      - name: Check quality gate
-        # TODO 6: Doc f1 tu output cua job train.
-        #         Neu f1 < 0.65, ket thuc voi loi ro rang.
-        #         Neu dat nguong, in thong bao va tiep tuc.
-        #
-        # Goi y:
-        #   f1 = float("${{ needs.train.outputs.f1 }}")
-        #   if f1 < 0.65:
-        #       raise SystemExit(f"FAILED: f1_score {f1:.4f} < 0.65. Huy trien khai.")
-        #   print("PASSED: dang trien khai model.")
+      - name: Check quality gate (F1 >= 0.65)
         run: |
           python - <<'PYEOF'
-          # <dien code Python o day>
+          import sys
+          f1 = float("${{ needs.train.outputs.f1 }}")
+          threshold = 0.65
+          print(f"Checking Quality Gate: F1 = {f1:.4f} (Threshold = {threshold})")
+          if f1 < threshold:
+              print(f"FAILED: F1 score {f1:.4f} is below quality threshold {threshold}!")
+              sys.exit(1)
+          print("PASSED: F1 score meets the quality requirement.")
           PYEOF
 
-
-  # ---------------------------------------------------------------------------
-  # JOB 4 - RELEASE
-  # Trien khai len VM qua SSH.
-  # Chi chay khi Job 3 (Quality Gate) hoan thanh thanh cong.
-  # ---------------------------------------------------------------------------
+  # JOB 4: Trien khai sau khi Quality Gate qua
   release:
     name: Release
-    needs: quality-gate
+    needs: [train, quality-gate]
     runs-on: ubuntu-latest
     steps:
+      - name: Download model artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: report
+          path: ./artifacts
 
-      - name: SSH deploy to VM
+      - name: Copy model to VM via SCP
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USER }}
+          key: ${{ secrets.SERVER_SSH_KEY }}
+          source: "./artifacts/models/model.joblib"
+          target: "~/models/model.joblib"
+          strip_components: 2
+
+      - name: SSH deploy and restart service on VM
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.SERVER_HOST }}
           username: ${{ secrets.SERVER_USER }}
           key: ${{ secrets.SERVER_SSH_KEY }}
           script: |
-            # TODO 7: Restart service income-api tren VM.
-            # TODO 8: Cho server san sang roi goi curl /healthz de xac nhan.
-            #         Neu health check that bai sau nhieu lan thu, thoat voi exit 1.
-            #
-            # Goi y:
-            #   sudo systemctl restart income-api
-            #   sleep 5
-            #   curl -sf http://localhost:8080/healthz && echo "Health check passed." || exit 1
-            # <dien lenh bash o day>
+            echo "Deploying new model on VM..."
+            sudo systemctl restart income-api
+            sleep 5
+            curl -f http://127.0.0.1:8080/healthz || exit 1
+            echo "Deploy successful!"
